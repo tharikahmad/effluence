@@ -160,7 +160,7 @@ static void	efflu_append_LOG_line(char **post, size_t *size, size_t *offset, con
 
 static void	efflu_write(efflu_destination_t destination, const char *post)
 {
-	char		*db_encoded, *endpoint = NULL;
+	char		*db_encoded, *endpoint, *token = NULL;
 	CURLcode	ret;
 	long		res;
 
@@ -170,28 +170,33 @@ static void	efflu_write(efflu_destination_t destination, const char *post)
 		return;
 	}
 
-	if (NULL == (db_encoded = curl_easy_escape(hnd, destination.db, 0)))
-		printf("Failed to URL encode database name.\n");
-	/* TODO Need a portable alternative to asprintf() */
-	else if (-1 == asprintf(&endpoint, "%s/write?db=%s", destination.url, db_encoded))
-		printf("Failed to compose write endpoint URL.\n");
-	else if (CURLE_OK != (ret = curl_easy_setopt(hnd, CURLOPT_URL, endpoint)))
-		printf("Failed to set cURL URL option: %s\n", curl_easy_strerror(ret));
-	else if (NULL != destination.user && CURLE_OK != (ret = curl_easy_setopt(hnd, CURLOPT_USERNAME, destination.user)))
-		printf("Failed to set cURL username option: %s\n", curl_easy_strerror(ret));
-	else if (NULL != destination.pass && CURLE_OK != (ret = curl_easy_setopt(hnd, CURLOPT_PASSWORD, destination.pass)))
-		printf("Failed to set cURL password option: %s\n", curl_easy_strerror(ret));
-	else if (CURLE_OK != (ret = curl_easy_setopt(hnd, CURLOPT_POSTFIELDS, post)))
-		printf("Failed to set cURL POST fields option: %s\n", curl_easy_strerror(ret));
-	else if (CURLE_OK != (ret = curl_easy_perform(hnd)))
-		printf("Error while POSTing data: %s\n", curl_easy_strerror(ret));
-	else if (CURLE_OK != (ret = curl_easy_getinfo(hnd, CURLINFO_RESPONSE_CODE, &res)))
-		printf("Failed to get HTTP response code from cURL: %s\n", curl_easy_strerror(ret));
-	else if (204L != res)	/* No Content */
-		printf("Got HTTP response code %ld when writing to %s\n", res, endpoint);
+	CURL *curl;
+	curl = curl_easy_init();
+	
+	if(curl) {
+	
+	  curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+	  
+	  if(-1 == asprintf(&endpoint, "%s/api/v2/write?org=%s&bucket=%s", destination.url, destination.org, destination.bucket));
+	  if(-1 == asprintf(&token, "Authorization: Token %s", destination.token));
+	  ret = curl_easy_setopt(curl, CURLOPT_URL, endpoint);
+	  ret = curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	  ret =curl_easy_setopt(curl, CURLOPT_DEFAULT_PROTOCOL, "https");
+	  struct curl_slist *headers = NULL;
+	  headers = curl_slist_append(headers, token);
+	  headers = curl_slist_append(headers, "Content-Type: text/plain; charset=utf-8");
+	  headers = curl_slist_append(headers, "Accept: application/json");
+	  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post);
+	  res = curl_easy_perform(curl);
+	}
+	curl_easy_cleanup(curl);
+		
+	
+	
+	
+	
 
-	curl_free(db_encoded);
-	free(endpoint);
 }
 
 #define EFFLU_CALLBACK(data_type)	\
@@ -233,14 +238,14 @@ ZBX_HISTORY_WRITE_CBS	zbx_module_history_write_cbs(void)
 
 		destination = efflu_configured_destination(type);
 
-		if (NULL == destination.url || NULL == destination.db)
+		if (NULL == destination.url || NULL == destination.bucket)
 		{
 			printf("History of type \"%s\" will not be exported.\n", efflu_data_type_string(type));
 			continue;
 		}
 
 		printf("History of type \"%s\" will be exported to URL \"%s\" and database \"%s\".\n",
-				efflu_data_type_string(type), destination.url, destination.db);
+				efflu_data_type_string(type), destination.url, destination.bucket);
 
 		switch (type)
 		{
